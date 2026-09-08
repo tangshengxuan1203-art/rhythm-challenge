@@ -676,6 +676,28 @@ html, body {
     </div>
   </div>
 
+
+  <div class="modal-backdrop" id="bulkImportModal">
+    <div class="modal">
+      <h3><span>📋 批量导入单词</span><button class="close" id="bulkImportClose">×</button></h3>
+      <p style="color: #aaa; font-size: 12px; margin-bottom: 12px;">一行一个单词（或用逗号/竖线/空格分隔）。只取前 8 个填入格子。</p>
+      <textarea id="bulkImportTextarea" class="input" style="height: 180px; font-family: monospace; font-size: 13px; line-height: 1.6;" placeholder="apple&#10;banana&#10;cat, dog, egg, fish, go, hat, jump"></textarea>
+      <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <span class="field-label" style="font-size: 11px; margin: 0;">类型：</span>
+        <div class="radio-group">
+          <label data-bulk-type="text" class="checked"><input type="radio" name="bulkType" value="text">文字</label>
+          <label data-bulk-type="emoji"><input type="radio" name="bulkType" value="emoji">Emoji</label>
+          <label data-bulk-type="image"><input type="radio" name="bulkType" value="image">图片URL</label>
+          <label data-bulk-type="mix"><input type="radio" name="bulkType" value="mix">混合</label>
+        </div>
+      </div>
+      <div id="bulkPreview" style="margin-top: 12px; padding: 10px; background: #2a2a2e; border-radius: 8px; min-height: 36px; font-size: 12px; color: #aaa;">预览：<span style="color: #fff;">空</span></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="bulkImportCancel">取消</button>
+        <button class="btn btn-primary" id="bulkImportConfirm">导入</button>
+      </div>
+    </div>
+  </div>
   <div class="modal-backdrop" id="shareModal">
     <div class="modal share-modal-content">
       <h3><span>🔗 分享挑战</span><button class="close" id="shareClose">×</button></h3>
@@ -736,9 +758,18 @@ function init() {
   $("bgmBadge").addEventListener("click", toggleBGM);
   $("fullscreenBtn").addEventListener("click", toggleFullscreen);
   $("settingsBtn").addEventListener("click", openSettings);
-  $("previewBtn").addEventListener("click", togglePreview);
-  $("audioBar").addEventListener("click", seekAudio);
+  const pb = $("previewBtn"); if (pb) pb.addEventListener("click", togglePreview);
+  const ab = $("audioBar"); if (ab) ab.addEventListener("click", seekAudio);
   $("settingsClose").addEventListener("click", closeSettings);
+  const bim = $("bulkImportClose"); if (bim) bim.addEventListener("click", closeBulkImport);
+  const bic = $("bulkImportCancel"); if (bic) bic.addEventListener("click", closeBulkImport);
+  const biq = $("bulkImportConfirm"); if (biq) biq.addEventListener("click", confirmBulkImport);
+  const bit = $("bulkImportTextarea"); if (bit) bit.addEventListener("input", updateBulkPreview);
+  document.querySelectorAll("[data-bulk-type]").forEach(el => el.addEventListener("click", () => {
+    bulkType = el.dataset.bulkType;
+    document.querySelectorAll("[data-bulk-type]").forEach(x => x.classList.toggle("checked", x === el));
+    updateBulkPreview();
+  }));
   $("settingsDone").addEventListener("click", closeSettings);
   $("settingsReset").addEventListener("click", resetSettings);
   $("settingsModal").addEventListener("click", (e) => { if (e.target.id === "settingsModal") closeSettings(); });
@@ -763,10 +794,10 @@ function init() {
   $("roundsCount").addEventListener("change", (e) => { state.totalRounds = Math.max(0, Math.min(20, parseInt(e.target.value) || 0)); saveSettings(); });
   $("speedIncrease").addEventListener("change", (e) => { state.speedIncrease = Math.max(0, Math.min(50, parseInt(e.target.value) || 0)); saveSettings(); });
   $("countdownDur").addEventListener("change", (e) => { state.countdownDur = Math.max(0, Math.min(10, parseInt(e.target.value) || 3)); saveSettings(); });
-  $("audioLoop").addEventListener("change", (e) => { state.audioLoop = e.target.checked; if (state.customAudioElement) state.customAudioElement.loop = state.audioLoop; saveSettings(); });
+  const al = $("audioLoop"); if (al) al.addEventListener("change", (e) => { state.audioLoop = e.target.checked; if (state.customAudioElement) state.customAudioElement.loop = state.audioLoop; saveSettings(); });
   $("tempoInput").addEventListener("input", (e) => {
     state.tempoPercent = parseInt(e.target.value);
-    $("tempoVal").textContent = state.tempoPercent + "%";
+    const tv = $("tempoVal"); if (tv) tv.textContent = state.tempoPercent + "%";
     if (state.customAudioElement) state.customAudioElement.playbackRate = state.tempoPercent / 100;
     saveSettings();
   });
@@ -798,18 +829,18 @@ function loadSettings() {
   const saved = localStorage.getItem("rhythm_settings_v3");
   if (!saved) return;
   try { Object.assign(state, JSON.parse(saved)); } catch(e){}
-  $("bgmEnabled").checked = state.bgmEnabled;
-  $("bgmVolume").value = Math.round(state.bgmVolume * 100);
-  $("volumeLabel").textContent = Math.round(state.bgmVolume * 100) + "%";
-  $("roundsBeats").value = state.beatsPerRound;
-  $("roundsCount").value = state.totalRounds;
-  $("speedIncrease").value = state.speedIncrease;
-  $("countdownDur").value = state.countdownDur;
-  $("tapMode").checked = state.tapMode;
-  $("revealMode").checked = state.revealMode;
-  $("tempoInput").value = state.tempoPercent;
-  $("tempoVal").textContent = state.tempoPercent + "%";
-  $("audioLoop").checked = state.audioLoop;
+  const bgmEn = $("bgmEnabled"); if (bgmEn) bgmEn.checked = state.bgmEnabled;
+  const bv = $("bgmVolume"); if (bv) bv.value = Math.round(state.bgmVolume * 100);
+  const vl = $("volumeLabel"); if (vl) vl.textContent = Math.round(state.bgmVolume * 100) + "%";
+  const rb = $("roundsBeats"); if (rb) rb.value = state.beatsPerRound;
+  const rc = $("roundsCount"); if (rc) rc.value = state.totalRounds;
+  const si = $("speedIncrease"); if (si) si.value = state.speedIncrease;
+  const cd = $("countdownDur"); if (cd) cd.value = state.countdownDur;
+  const tm = $("tapMode"); if (tm) tm.checked = state.tapMode;
+  const rm = $("revealMode"); if (rm) rm.checked = state.revealMode;
+  const ti = $("tempoInput"); if (ti) ti.value = state.tempoPercent;
+  const tv = $("tempoVal"); if (tv) tv.textContent = state.tempoPercent + "%";
+  const al2 = $("audioLoop"); if (al2) al2.checked = state.audioLoop;
   selectPattern(state.bgmPattern, false);
   selectPlayMode(state.playMode, false);
 }
@@ -925,15 +956,17 @@ function downscaleImage(dataUrl, maxSize, cb) {
 function renderControls() {
   if (state.mode === "edit") {
     controls.innerHTML = `
-      <button class="btn btn-primary" data-action="fill-yilin7a-u1">📖 译林 7A U1</button>
+      <button class="btn btn-primary" data-action="bulk-import">📋 批量导入</button>
+
+<button class="btn btn-primary" data-action="fill-yilin7a-u1">📖 译林 7A U1</button>
       <button class="btn btn-ghost" data-action="clear">🗑️ 清空</button>
       <button class="btn btn-secondary" data-action="goto-play">▶ 进入挑战</button>
       <button class="btn btn-ghost" data-action="share">🔗 分享</button>
     `;
     const yb = controls.querySelector("[data-action=fill-yilin7a-u1]");
     if (yb) yb.onclick = () => quickFill("yilin7a-u1");
-    const fbEn = controls.querySelector("[data-action=fill-en]"); if (fbEn) fbEn.onclick = () => quickFill("en");
-    const fbZh = controls.querySelector("[data-action=fill-zh]"); if (fbZh) fbZh.onclick = () => quickFill("zh");
+    const bi = controls.querySelector("[data-action=bulk-import]");
+    if (bi) bi.onclick = openBulkImport;
     controls.querySelector("[data-action=clear]").onclick = clearAll;
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
@@ -1146,7 +1179,7 @@ function ensureBgm() {
   updateBgmBadge();
 }
 function stopBgm() { if (state.customAudioElement && !state.customAudioElement.paused) state.customAudioElement.pause(); updateBgmBadge(); }
-function toggleBGM() { state.bgmEnabled = !state.bgmEnabled; saveSettings(); $("bgmEnabled").checked = state.bgmEnabled; state.bgmEnabled ? ensureBgm() : stopBgm(); }
+function toggleBGM() { state.bgmEnabled = !state.bgmEnabled; saveSettings(); const bge = $("bgmEnabled"); if (bge) bge.checked = state.bgmEnabled; state.bgmEnabled ? ensureBgm() : stopBgm(); }
 function updateBgmBadge() {
   const playing = state.playing && state.bgmEnabled;
   $("bgmBadge").classList.toggle("muted", !playing);
@@ -1246,7 +1279,7 @@ async function handleCustomAudio(e) {
       const beatSec = 60 / state.audioBpm;
       const roundsNeeded = Math.max(1, Math.round(dur / (beatsPerRound * beatSec)));
       state.totalRounds = Math.min(roundsNeeded, 12);
-      $("roundsCount").value = state.totalRounds;
+      const rc = $("roundsCount"); if (rc) rc.value = state.totalRounds;
       saveSettings();
     }
   });
@@ -1255,6 +1288,50 @@ async function handleCustomAudio(e) {
   updateBgmBadge();
 }
 
+
+let bulkType = "text";
+function openBulkImport() {
+  $("bulkImportTextarea").value = state.words.filter(Boolean).join("\n");
+  $("bulkImportModal").classList.add("show");
+  updateBulkPreview();
+}
+function closeBulkImport() { $("bulkImportModal").classList.remove("show"); }
+function parseBulkText(text) {
+  return text.split(/[\s,，|｜;|;、]+/).map(s => s.trim()).filter(Boolean).slice(0, 8);
+}
+function updateBulkPreview() {
+  const list = parseBulkText($("bulkImportTextarea").value);
+  let preview = list.length === 0 ? "空" : list.map((w, i) => {
+    if (bulkType === "image") return `[${i+1}] 🖼 ${w.length > 20 ? w.slice(0, 20) + "..." : w}`;
+    if (bulkType === "emoji") return `[${i+1}] 😀 ${w}`;
+    if (bulkType === "mix") {
+      if (/^https?:\/\//.test(w) || /^data:/.test(w)) return `[${i+1}] 🖼 URL`;
+      if (/^[\p{Emoji}]/u.test(w)) return `[${i+1}] 😀 ${w}`;
+      return `[${i+1}] T ${w}`;
+    }
+    return `[${i+1}] ${w}`;
+  }).join(" | ");
+  $("bulkPreview").innerHTML = `预览 (${list.length}/8): <span style="color: #fff;">${preview}</span>`;
+}
+function confirmBulkImport() {
+  const list = parseBulkText($("bulkImportTextarea").value);
+  if (list.length === 0) { alert("请输入至少一个单词"); return; }
+  while (list.length < 8) list.push("");
+  state.words = list.slice(0, 8);
+  if (bulkType === "mix") {
+    state.cellType = state.words.map(w => {
+      if (!w) return "text";
+      if (/^https?:\/\//.test(w) || /^data:/.test(w)) return "image";
+      if (/^[\p{Emoji}]/u.test(w)) return "emoji";
+      return "text";
+    });
+  } else {
+    state.cellType = state.cellType.map(() => bulkType);
+  }
+  saveWords(); saveSettings();
+  renderGrid();
+  closeBulkImport();
+}
 async function pickDesktopAudio() {
   // 现代浏览器（Chrome/Edge 86+）：用 File System Access API 自动定位桌面
   if (window.showOpenFilePicker) {
@@ -1475,6 +1552,15 @@ init();
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 
 
