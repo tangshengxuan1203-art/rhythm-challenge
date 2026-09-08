@@ -963,8 +963,8 @@ function renderControls() {
     `;
     const yb = controls.querySelector("[data-action=fill-yilin7a-u1]");
     if (yb) yb.onclick = () => quickFill("yilin7a-u1");
-    controls.querySelector("[data-action=fill-en]").onclick = () => quickFill("en");
-    controls.querySelector("[data-action=fill-zh]").onclick = () => quickFill("zh");
+    const fbEn = controls.querySelector("[data-action=fill-en]"); if (fbEn) fbEn.onclick = () => quickFill("en");
+    const fbZh = controls.querySelector("[data-action=fill-zh]"); if (fbZh) fbZh.onclick = () => quickFill("zh");
     controls.querySelector("[data-action=bulk-import]").onclick = openBulkImport;
     controls.querySelector("[data-action=export-json]").onclick = exportConfigJson;
     controls.querySelector("[data-action=import-json]").onclick = () => $("importJsonInput").click();
@@ -972,6 +972,8 @@ function renderControls() {
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
     if (shareBtn1) shareBtn1.onclick = openShare;
+    const fbEn = controls.querySelector("[data-action=fill-en]"); if (fbEn) fbEn.onclick = () => quickFill("en");
+    const fbZh = controls.querySelector("[data-action=fill-zh]"); if (fbZh) fbZh.onclick = () => quickFill("zh");
   } else {
     controls.innerHTML = `
       <div class="speed-toggle">
@@ -1507,6 +1509,7 @@ init();
 </script>
 </body>
 </html>
+
 
 
 
