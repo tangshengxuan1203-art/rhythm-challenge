@@ -689,7 +689,7 @@ html, body {
   <div class="modal-backdrop" id="bulkImportModal">
     <div class="modal">
       <h3><span>📋 批量导入单词</span><button class="close" id="bulkImportClose">×</button></h3>
-      <p style="color: #aaa; font-size: 12px; margin-bottom: 12px;">一行一个单词（或用逗号/竖线/空格分隔）。只取前 8 个填入格子。</p>
+      <p style="color: #aaa; font-size: 12px; margin-bottom: 12px;">一行一个单词（或用逗号/竖线/空格分隔）。可一次导入任意数量，系统每 8 个自动分为一批。</p>
       <textarea id="bulkImportTextarea" class="input" style="height: 180px; font-family: monospace; font-size: 13px; line-height: 1.6;" placeholder="apple&#10;banana&#10;cat, dog, egg, fish, go, hat, jump"></textarea>
       <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
         <span class="field-label" style="font-size: 11px; margin: 0;">类型：</span>
@@ -719,7 +719,7 @@ html, body {
 
 <script>
 const state = {
-  mode: "edit", words: Array(8).fill(""), cellType: Array(8).fill("text"), allWords: [], batchIdx: 0, totalBatches: 0,
+  mode: "edit", words: Array(8).fill(""), cellType: Array(8).fill("text"), allWords: [], allCellTypes: [], batchIdx: 0, totalBatches: 0,
   activeIndex: -1, playing: false, speed: "slow",
   intervalId: null, audioCtx: null,
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
@@ -745,7 +745,7 @@ const DEFAULTS = {
   playMode: "normal", totalRounds: 3, beatsPerRound: 16,
   speedIncrease: 0, countdownDur: 3,
   tapMode: true, revealMode: false,
-  cellType: Array(8).fill("text"), allWords: [], batchIdx: 0,
+  cellType: Array(8).fill("text"), allWords: [], allCellTypes: [], batchIdx: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -756,6 +756,7 @@ const infoRow = $("infoRow"), appEl = $("app"), stageEl = $("stage");
 
 function init() {
   loadSettings(); loadWords();
+  ensureBatchState();
   for (let i = 0; i < 8; i++) {
     const dot = document.createElement("div");
     dot.className = "beat-dot" + (i === 0 ? " first" : "");
@@ -787,6 +788,8 @@ function init() {
   $("clearCustomAudio").addEventListener("click", clearCustomAudio);
   $("roundCloseBtn").addEventListener("click", closeRoundOverlay);
   $("roundNextBtn").addEventListener("click", () => { closeRoundOverlay(); startPlay(true); });
+  $("batchPrev").addEventListener("click", prevBatch);
+  $("batchNext").addEventListener("click", nextBatch);
 
   $("bgmEnabled").addEventListener("change", (e) => { state.bgmEnabled = e.target.checked; saveSettings(); updateBgmBadge(); if (state.playing) e.target.checked ? ensureBgm() : stopBgm(); });
   $("bgmVolume").addEventListener("input", (e) => { state.bgmVolume = e.target.value / 100; $("volumeLabel").textContent = e.target.value + "%"; saveSettings(); if (state.customAudioElement) state.customAudioElement.volume = state.bgmVolume; });
@@ -796,7 +799,7 @@ function init() {
     // 批量设置所有格子的类型
     const t = el.dataset.celltype;
     state.cellType = state.cellType.map(() => t);
-    saveSettings(); renderGrid();
+    syncCurrentBatch(); saveWords(); saveSettings(); renderGrid();
     document.querySelectorAll("[data-celltype]").forEach(x => x.classList.toggle("checked", x === el));
   }));
   $("roundsBeats").addEventListener("change", (e) => { state.beatsPerRound = Math.max(8, Math.min(64, parseInt(e.target.value) || 16)); saveSettings(); });
@@ -812,15 +815,6 @@ function init() {
   });
   $("shareClose").onclick = closeShare;
   $("copyShareBtn").onclick = copyShareLink;
-  $("bulkImportClose").onclick = closeBulkImport;
-  $("bulkImportCancel").onclick = closeBulkImport;
-  $("bulkImportConfirm").onclick = confirmBulkImport;
-  $("bulkImportTextarea").addEventListener("input", updateBulkPreview);
-  document.querySelectorAll("[data-bulk-type]").forEach(el => el.addEventListener("click", () => {
-    bulkType = el.dataset.bulkType;
-    document.querySelectorAll("[data-bulk-type]").forEach(x => x.classList.toggle("checked", x === el));
-    updateBulkPreview();
-  }));
 
   $("tapMode").addEventListener("change", (e) => { state.tapMode = e.target.checked; saveSettings(); });
   $("revealMode").addEventListener("change", (e) => { state.revealMode = e.target.checked; saveSettings(); renderGrid(); });
@@ -828,18 +822,30 @@ function init() {
   document.addEventListener("keydown", handleKey);
   applyUrlParams();
   updateBatchNav();
+  loadBundledAudio();
 }
 
 function loadWords() {
-  const saved = localStorage.getItem("rhythm_words_v3");
+  const saved = localStorage.getItem("rhythm_words_v4") || localStorage.getItem("rhythm_words_v3");
   if (!saved) return;
   try {
     const p = JSON.parse(saved);
     if (Array.isArray(p) && p.length === 8) { state.words = p; }
-    else if (p && Array.isArray(p.words)) { state.words = p.words; state.allWords = p.allWords || []; state.batchIdx = p.batchIdx || 0; state.totalBatches = Math.ceil(state.allWords.length / 8); }
+    else if (p && Array.isArray(p.words)) {
+      state.words = p.words;
+      state.cellType = Array.isArray(p.cellType) ? p.cellType : state.cellType;
+      state.allWords = Array.isArray(p.allWords) ? p.allWords : [];
+      state.allCellTypes = Array.isArray(p.allCellTypes) ? p.allCellTypes : [];
+      state.batchIdx = p.batchIdx || 0;
+    }
   } catch(e){}
+  ensureBatchState();
 }
-function saveWords() { const data = { words: state.words, cellType: state.cellType, allWords: state.allWords, batchIdx: state.batchIdx }; localStorage.setItem("rhythm_words_v3", JSON.stringify(data)); }
+function saveWords() {
+  syncCurrentBatch();
+  const data = { words: state.words, cellType: state.cellType, allWords: state.allWords, allCellTypes: state.allCellTypes, batchIdx: state.batchIdx };
+  localStorage.setItem("rhythm_words_v4", JSON.stringify(data));
+}
 function loadSettings() {
   const saved = localStorage.getItem("rhythm_settings_v3");
   if (!saved) return;
@@ -896,7 +902,7 @@ function renderGrid() {
           const img = document.createElement("img"); img.src = state.words[i]; cell.appendChild(img);
           const actions = document.createElement("div"); actions.className = "img-actions";
           actions.innerHTML = `<button title="换图" data-act="replace">🔄</button><button title="删除" data-act="remove">✕</button>`;
-          actions.onclick = (e) => { e.stopPropagation(); const a = e.target.dataset.act; if (a === "remove") { state.words[i] = ""; saveWords(); renderGrid(); } else if (a === "replace") triggerImageUpload(i); };
+          actions.onclick = (e) => { e.stopPropagation(); const a = e.target.dataset.act; if (a === "remove") { state.words[i] = ""; syncCurrentBatch(); saveWords(); renderGrid(); } else if (a === "replace") triggerImageUpload(i); };
           cell.appendChild(actions);
         } else {
           cell.innerHTML = `<div class="img-empty"><span class="emoji">🖼️</span><span>点此上传图片</span></div>`;
@@ -906,7 +912,7 @@ function renderGrid() {
         const input = document.createElement("input");
         input.type = "text"; input.value = state.words[i] || ""; input.placeholder = type === "emoji" ? "🎵" : "单词 " + (i + 1);
         input.maxLength = type === "emoji" ? 4 : 12; input.autocomplete = "off"; input.spellcheck = false;
-        input.addEventListener("input", (e) => { state.words[i] = e.target.value.trim(); saveWords(); });
+        input.addEventListener("input", (e) => { state.words[i] = e.target.value.trim(); syncCurrentBatch(); saveWords(); });
         input.addEventListener("keydown", (e) => {
           if (e.key === "Enter") { e.preventDefault(); const n = grid.children[(i+1) % 8].querySelector("input"); if (n) n.focus(); }
         });
@@ -915,7 +921,7 @@ function renderGrid() {
         typeToggle.innerHTML = `<button data-t="text" title="文字">𝐓</button><button data-t="emoji" title="Emoji">😀</button><button data-t="image" title="图片">🖼</button>`;
         typeToggle.querySelectorAll("button").forEach(b => {
           if (b.dataset.t === type) b.classList.add("active");
-          b.onclick = (e) => { e.stopPropagation(); state.cellType[i] = b.dataset.t; saveSettings(); renderGrid(); };
+          b.onclick = (e) => { e.stopPropagation(); state.cellType[i] = b.dataset.t; syncCurrentBatch(); saveWords(); saveSettings(); renderGrid(); };
         });
         cell.appendChild(typeToggle);
       }
@@ -947,8 +953,9 @@ function triggerImageUpload(idx) {
         try {
           state.words[idx] = scaled;
           state.cellType[idx] = "image";
+          syncCurrentBatch();
           saveWords(); saveSettings(); renderGrid();
-        } catch (e) { alert("图片保存失败：localStorage 容量不够。请清除浏览器数据。"); }
+        } catch (e) { alert("图片保存失败：浏览器存储空间不足。请换一张更小的图，或清除本网站的旧图片后重试。"); }
       });
     };
     reader.onerror = () => alert("图片读取失败");
@@ -960,14 +967,17 @@ function triggerImageUpload(idx) {
 function downscaleImage(dataUrl, maxSize, cb) {
   const img = new Image();
   img.onload = () => {
-    if (img.width <= maxSize && img.height <= maxSize && dataUrl.length < 100000) { cb(dataUrl); return; }
-    const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1);
-    const w = Math.round(img.width * ratio), h = Math.round(img.height * ratio);
-    const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0, w, h);
-    cb(canvas.toDataURL("image/jpeg", 0.85));
-    } catch (e) { console.error("downscale fail", e); cb(dataUrl); }
+    try {
+      const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1);
+      const w = Math.max(1, Math.round(img.width * ratio)), h = Math.max(1, Math.round(img.height * ratio));
+      const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      cb(canvas.toDataURL("image/jpeg", 0.82));
+    } catch (e) {
+      console.error("图片缩放失败", e);
+      cb(dataUrl);
+    }
   };
   img.onerror = () => { alert("图片解码失败，请尝试其他图片"); };
   img.src = dataUrl;
@@ -1025,8 +1035,9 @@ function updateBpm() { bpmText.textContent = SPEED_BPM[state.speed]; modeTag.tex
 
 function updateProgress() {
   progressEl.textContent = (state.activeIndex < 0 ? 0 : state.activeIndex + 1) + "/8";
-  if (state.totalRounds > 0) roundLabel.textContent = `第 ${state.round}/${state.totalRounds} 回合 · ${state.beatInRound}/${state.beatsPerRound}`;
-  else roundLabel.textContent = `第 ${state.round} 回合 · 无限循环`;
+  const batch = state.totalBatches > 1 ? `第 ${state.batchIdx + 1}/${state.totalBatches} 批 · ` : "";
+  if (state.totalRounds > 0) roundLabel.textContent = `${batch}第 ${state.round}/${state.totalRounds} 回合 · ${state.beatInRound}/${state.beatsPerRound}`;
+  else roundLabel.textContent = `${batch}第 ${state.round} 回合 · 无限循环`;
 }
 
 function switchMode(mode) {
@@ -1043,6 +1054,7 @@ function setActive(orderIdx) {
   document.querySelectorAll(".cell").forEach((c, i) => {
     const isActive = i === state.activeIndex;
     c.classList.toggle("active", isActive);
+    if ((state.cellType[i] || "text") === "image") return;
     if (state.words[i]) {
       const showWord = state.revealMode || isActive;
       c.classList.toggle("placeholder", !showWord);
@@ -1062,6 +1074,14 @@ function setActive(orderIdx) {
 function clearBeatDots() { document.querySelectorAll(".beat-dot").forEach(d => d.classList.remove("on")); }
 function next() {
   let n = state.orderIdx + 1; if (n >= 8) n = 0;
+  if (n === 0 && state.totalBatches > 1) {
+    syncCurrentBatch();
+    state.batchIdx = (state.batchIdx + 1) % state.totalBatches;
+    loadCurrentBatch();
+    saveWords();
+    renderGrid();
+    updateBatchNav();
+  }
   // 速度递增：每过一轮，BPM 加快
   if (state.speedIncrease > 0 && state.beatInRound > 0 && state.beatInRound % 8 === 0) {
     if (state.intervalId) clearInterval(state.intervalId);
@@ -1204,7 +1224,7 @@ function toggleBGM() { state.bgmEnabled = !state.bgmEnabled; saveSettings(); con
 function updateBgmBadge() {
   const playing = state.playing && state.bgmEnabled;
   $("bgmBadge").classList.toggle("muted", !playing);
-  $("bgmLabel").textContent = playing ? (state.customAudioElement ? "BGM 自定义" : "BGM Wordonbeat") : "BGM 静音";
+  $("bgmLabel").textContent = playing ? (state.customAudioElement ? "BGM Wordonbeat" : "BGM 节拍器") : "BGM 静音";
   const bgmHint = $("bgmHint");
   if (bgmHint) {
     if (state.customAudioElement || !state.bgmEnabled || !playing) {
@@ -1284,49 +1304,56 @@ function playSuccess() {
   osc.start(t); osc.stop(t + 0.13);
 }
 
-async function handleCustomAudio(e) {
-  const file = e.target.files[0]; if (!file) return;
-  state.customAudioName = file.name;
-  $("customAudioName").textContent = file.name;
-  if (state.customAudioElement) { state.customAudioElement.pause(); state.customAudioElement = null; }
-  state.customAudioBuffer = null;
-  const url = URL.createObjectURL(file);
-  const audio = new Audio(url);
-  audio.loop = state.audioLoop; audio.volume = state.bgmVolume; audio.playbackRate = state.tempoPercent / 100;
+function bindAudio(audio, label, sizeLabel = "") {
+  if (state.customAudioElement) state.customAudioElement.pause();
+  state.customAudioName = label;
+  audio.loop = state.audioLoop;
+  audio.volume = state.bgmVolume;
+  audio.playbackRate = state.tempoPercent / 100;
   audio.addEventListener("timeupdate", updateAudioProgress);
   audio.addEventListener("ended", onAudioEnded);
   audio.addEventListener("loadedmetadata", () => {
-    // 显示音频元信息
-    const dur = audio.duration;
-    const m = Math.floor(dur / 60), s = Math.floor(dur % 60);
-    state.audioDuration = dur;
-    const orig = state.customAudioName || file.name;
-    $("customAudioName").textContent = `🎵 ${orig} · ${m}:${s.toString().padStart(2, "0")} · ${(file.size / 1048576).toFixed(1)}MB`;
-    // 默认按 120 BPM 一回合 16 拍 = 8 秒，估算回合数
-    if (state.totalRounds === 3 && dur > 0) {
-      const beatsPerRound = 16;
-      const beatSec = 60 / state.audioBpm;
-      const roundsNeeded = Math.max(1, Math.round(dur / (beatsPerRound * beatSec)));
-      state.totalRounds = Math.min(roundsNeeded, 12);
-      const rc = $("roundsCount"); if (rc) rc.value = state.totalRounds;
-      saveSettings();
+    const duration = audio.duration;
+    state.audioDuration = duration;
+    $("customAudioName").textContent = `🎵 ${label} · ${formatTime(duration)}${sizeLabel}`;
+    updateAudioProgress();
+  });
+  audio.addEventListener("canplay", () => {
+    if (state.playing && state.bgmEnabled) audio.play().catch(() => {});
+  });
+  audio.addEventListener("error", () => {
+    if (state.customAudioElement === audio) {
+      $("customAudioName").textContent = `⚠️ 无法读取 ${label}；请点击“上传”重新选择音频。`;
     }
   });
-  audio.addEventListener("canplay", () => { if (state.playing && state.bgmEnabled) audio.play().catch(() => {}); });
   state.customAudioElement = audio;
   updateBgmBadge();
+}
+
+function loadBundledAudio() {
+  if (state.customAudioElement) return;
+  const audio = new Audio(new URL("assets/wordonbeat.flac", location.href).href);
+  audio.preload = "metadata";
+  bindAudio(audio, "Wordonbeat（网站内置，与桌面同源）");
+}
+
+async function handleCustomAudio(e) {
+  const file = e.target.files[0]; if (!file) return;
+  state.customAudioBuffer = null;
+  bindAudio(new Audio(URL.createObjectURL(file)), file.name, ` · ${(file.size / 1048576).toFixed(1)}MB`);
 }
 
 
 let bulkType = "text";
 function openBulkImport() {
-  $("bulkImportTextarea").value = state.words.filter(Boolean).join("\n");
+  syncCurrentBatch();
+  $("bulkImportTextarea").value = state.allWords.filter(Boolean).join("\n");
   $("bulkImportModal").classList.add("show");
   updateBulkPreview();
 }
 function closeBulkImport() { $("bulkImportModal").classList.remove("show"); }
 function parseBulkText(text) {
-  return text.split(/[\s,，|｜;|;、]+/).map(s => s.trim()).filter(Boolean).slice(0, 8);
+  return text.split(/[\s,，|｜;；、]+/).map(s => s.trim()).filter(Boolean);
 }
 function updateBulkPreview() {
   const list = parseBulkText($("bulkImportTextarea").value);
@@ -1340,24 +1367,24 @@ function updateBulkPreview() {
     }
     return `[${i+1}] ${w}`;
   }).join(" | ");
-  $("bulkPreview").innerHTML = `预览 (${list.length}/8): <span style="color: #fff;">${preview}</span>`;
+  const groups = Math.max(1, Math.ceil(list.length / 8));
+  $("bulkPreview").innerHTML = `预览（${list.length} 个词，${groups} 批）: <span style="color: #fff;">${preview}</span>`;
 }
 function confirmBulkImport() {
   const list = parseBulkText($("bulkImportTextarea").value);
   if (list.length === 0) { alert("请输入至少一个单词"); return; }
+  let types;
   if (bulkType === "mix") {
-    const ct = list.map(w => {
+    types = list.map(w => {
       if (!w) return "text";
       if (/^https?:\/\//.test(w) || /^data:/.test(w)) return "image";
       if (/^[\p{Emoji}]/u.test(w)) return "emoji";
       return "text";
     });
-    while (ct.length < 8) ct.push("text");
-    state.cellType = ct.slice(0, 8);
   } else {
-    state.cellType = Array(list.length).fill(bulkType).concat(Array(Math.max(0, 8 - list.length)).fill("text"));
+    types = Array(list.length).fill(bulkType);
   }
-  setAllWords(list);
+  setAllWords(list, types);
   saveSettings();
   renderGrid();
   closeBulkImport();
@@ -1409,9 +1436,9 @@ function handleAudioFile(file) {
 function clearCustomAudio() {
   if (state.customAudioElement) { state.customAudioElement.pause(); state.customAudioElement = null; }
   state.customAudioBuffer = null; state.customAudioName = "";
-  $("customAudioName").textContent = "未上传自定义音频";
+  $("customAudioName").textContent = "正在恢复网站内置 Wordonbeat…";
   $("customAudioInput").value = "";
-  updateBgmBadge();
+  loadBundledAudio();
 }
 
 function formatTime(sec) {
@@ -1550,9 +1577,8 @@ function handleKey(e) {
 function applyUrlParams() {
   const p = new URLSearchParams(location.search);
   if (p.has("words")) {
-    const list = p.get("words").split(/[|,]/).map(s => s.trim()).filter(Boolean).slice(0, 8);
-    while (list.length < 8) list.push("");
-    state.words = list; saveWords();
+    const list = p.get("words").split(/[|,]/).map(s => s.trim()).filter(Boolean);
+    setAllWords(list); saveWords();
   }
   if (p.has("type")) {
     const types = p.get("type").split(/[|,]/).map(s => s.trim());
@@ -1572,15 +1598,52 @@ function applyUrlParams() {
 
 // ============ Quick fills ============
 function quickFill(type) {
-  if (type === "en") state.words = ["apple", "banana", "cat", "dog", "egg", "fish", "go", "hat"];
-  else if (type === "zh") state.words = ["太阳", "月亮", "星星", "云朵", "雨滴", "雪花", "彩虹", "微风"];
-  else if (type === "yilin7a-u1") state.words = ["I", "am", "name", "my", "your", "hello", "nice", "meet"];
-  renderGrid(); saveWords();
+  let list = [];
+  if (type === "en") list = ["apple", "banana", "cat", "dog", "egg", "fish", "go", "hat"];
+  else if (type === "zh") list = ["太阳", "月亮", "星星", "云朵", "雨滴", "雪花", "彩虹", "微风"];
+  else if (type === "yilin7a-u1") list = ["I", "am", "name", "my", "your", "hello", "nice", "meet"];
+  setAllWords(list); renderGrid(); updateBatchNav();
 }
-function clearAll() { state.words = Array(8).fill(""); renderGrid(); saveWords(); }
+function clearAll() {
+  state.words = Array(8).fill("");
+  state.cellType = Array(8).fill("text");
+  state.allWords = []; state.allCellTypes = []; state.batchIdx = 0; state.totalBatches = 1;
+  renderGrid(); saveWords(); updateBatchNav();
+}
 
-function setAllWords(list) {
+function ensureBatchState() {
+  if (!Array.isArray(state.allWords) || state.allWords.length === 0) {
+    state.allWords = state.words.slice();
+    state.allCellTypes = state.cellType.slice();
+  }
+  if (!Array.isArray(state.allCellTypes)) state.allCellTypes = [];
+  while (state.allCellTypes.length < state.allWords.length) state.allCellTypes.push("text");
+  state.totalBatches = Math.max(1, Math.ceil(state.allWords.length / 8));
+  state.batchIdx = Math.max(0, Math.min(state.batchIdx || 0, state.totalBatches - 1));
+  loadCurrentBatch();
+}
+
+function syncCurrentBatch() {
+  const start = (state.batchIdx || 0) * 8;
+  for (let i = 0; i < 8; i++) {
+    const pos = start + i;
+    const value = state.words[i] || "";
+    if (value || pos < state.allWords.length) {
+      state.allWords[pos] = value;
+      state.allCellTypes[pos] = state.cellType[i] || "text";
+    }
+  }
+  while (state.allWords.length && !state.allWords[state.allWords.length - 1]) {
+    state.allWords.pop();
+    state.allCellTypes.pop();
+  }
+  state.totalBatches = Math.max(1, Math.ceil(state.allWords.length / 8));
+  state.batchIdx = Math.min(state.batchIdx || 0, state.totalBatches - 1);
+}
+
+function setAllWords(list, types = []) {
   state.allWords = list.filter(Boolean);
+  state.allCellTypes = state.allWords.map((_, i) => types[i] || "text");
   state.totalBatches = Math.ceil(state.allWords.length / 8) || 0;
   state.batchIdx = 0;
   loadCurrentBatch();
@@ -1589,14 +1652,22 @@ function setAllWords(list) {
 function loadCurrentBatch() {
   const start = state.batchIdx * 8;
   const batch = state.allWords.slice(start, start + 8);
+  const batchTypes = state.allCellTypes.slice(start, start + 8);
   while (batch.length < 8) batch.push("" + "");
+  while (batchTypes.length < 8) batchTypes.push("text");
   state.words = batch;
+  state.cellType = batchTypes;
 }
 function nextBatch() {
-  if (state.batchIdx < state.totalBatches - 1) { state.batchIdx++; loadCurrentBatch(); renderGrid(); updateBatchNav(); }
+  if (state.playing) return;
+  syncCurrentBatch();
+  if (state.batchIdx < state.totalBatches - 1) { state.batchIdx++; loadCurrentBatch(); saveWords(); renderGrid(); updateBatchNav(); }
 }
 function prevBatch() {
-  if (state.batchIdx > 0) { state.batchIdx--; loadCurrentBatch(); renderGrid(); updateBatchNav(); }
+  if (state.playing) return;
+  syncCurrentBatch();
+  if (state.batchIdx > 0) { state.batchIdx--; loadCurrentBatch(); saveWords(); renderGrid(); updateBatchNav(); }
+}
 function updateBatchNav() {
   const nav = $("batchNav"); if (!nav) return;
   if (state.totalBatches > 1) {
