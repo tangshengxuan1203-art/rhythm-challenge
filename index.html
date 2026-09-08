@@ -676,34 +676,6 @@ html, body {
     </div>
   </div>
 
-  <input type="file" accept=".json,application/json" id="importJsonInput" style="display: none;">
-
-  <div class="modal-backdrop" id="bulkImportModal">
-    <div class="modal">
-      <h3><span>📋 批量导入单词</span><button class="close" id="bulkImportClose">×</button></h3>
-      <p style="color: #aaa; font-size: 12px; margin-bottom: 12px;">
-        一行一个单词（或用逗号/竖线/空格分隔）。自动取前 8 个填入格子。
-      </p>
-      <textarea id="bulkImportTextarea" class="input" style="height: 180px; font-family: monospace; font-size: 13px; line-height: 1.6;" placeholder="apple&#10;banana&#10;cat, dog, egg, fish, go, hat, jump"></textarea>
-      <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <span class="field-label" style="font-size: 11px; margin: 0; align-self: center;">内容类型：</span>
-        <div class="radio-group" style="flex: 1;">
-          <label data-bulk-type="text" class="checked"><input type="radio" name="bulkType" value="text">文字</label>
-          <label data-bulk-type="emoji"><input type="radio" name="bulkType" value="emoji">Emoji</label>
-          <label data-bulk-type="image"><input type="radio" name="bulkType" value="image">图片URL</label>
-          <label data-bulk-type="mix"><input type="radio" name="bulkType" value="mix">混合</label>
-        </div>
-      </div>
-      <div id="bulkPreview" style="margin-top: 12px; padding: 10px; background: #2a2a2e; border-radius: 8px; min-height: 36px; font-size: 12px; color: #aaa;">
-        预览：<span style="color: #fff;">空</span>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" id="bulkImportCancel">取消</button>
-        <button class="btn btn-primary" id="bulkImportConfirm">导入</button>
-      </div>
-    </div>
-  </div>
-
   <div class="modal-backdrop" id="shareModal">
     <div class="modal share-modal-content">
       <h3><span>🔗 分享挑战</span><button class="close" id="shareClose">×</button></h3>
@@ -809,7 +781,7 @@ function init() {
     document.querySelectorAll("[data-bulk-type]").forEach(x => x.classList.toggle("checked", x === el));
     updateBulkPreview();
   }));
-  $("importJsonInput").addEventListener("change", importConfigJson);
+
   $("tapMode").addEventListener("change", (e) => { state.tapMode = e.target.checked; saveSettings(); });
   $("revealMode").addEventListener("change", (e) => { state.revealMode = e.target.checked; saveSettings(); renderGrid(); });
 
@@ -953,10 +925,7 @@ function downscaleImage(dataUrl, maxSize, cb) {
 function renderControls() {
   if (state.mode === "edit") {
     controls.innerHTML = `
-      <button class="btn btn-primary" data-action="bulk-import">📋 批量导入</button>
       <button class="btn btn-primary" data-action="fill-yilin7a-u1">📖 译林 7A U1</button>
-      <button class="btn btn-ghost" data-action="export-json">💾 导出JSON</button>
-      <button class="btn btn-ghost" data-action="import-json">📁 导入JSON</button>
       <button class="btn btn-ghost" data-action="clear">🗑️ 清空</button>
       <button class="btn btn-secondary" data-action="goto-play">▶ 进入挑战</button>
       <button class="btn btn-ghost" data-action="share">🔗 分享</button>
@@ -965,9 +934,6 @@ function renderControls() {
     if (yb) yb.onclick = () => quickFill("yilin7a-u1");
     const fbEn = controls.querySelector("[data-action=fill-en]"); if (fbEn) fbEn.onclick = () => quickFill("en");
     const fbZh = controls.querySelector("[data-action=fill-zh]"); if (fbZh) fbZh.onclick = () => quickFill("zh");
-    controls.querySelector("[data-action=bulk-import]").onclick = openBulkImport;
-    controls.querySelector("[data-action=export-json]").onclick = exportConfigJson;
-    controls.querySelector("[data-action=import-json]").onclick = () => $("importJsonInput").click();
     controls.querySelector("[data-action=clear]").onclick = clearAll;
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
@@ -1509,6 +1475,8 @@ init();
 </script>
 </body>
 </html>
+
+
 
 
 
