@@ -223,6 +223,32 @@ html, body {
   text-align: center; color: #777; font-size: 12px; padding: 8px 0 0;
 }
 
+/* ============ v3.1 音频进度条 ============ */
+.audio-progress {
+  display: flex; align-items: center; gap: 10px;
+  background: #1c1c1f; border: 1px solid #2a2a2e; border-radius: 18px;
+  padding: 6px 14px; font-size: 12px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+.audio-progress .time { color: #aaa; min-width: 36px; text-align: center; }
+.audio-progress .bar {
+  flex: 1; height: 6px; background: #2a2a2e; border-radius: 3px;
+  position: relative; cursor: pointer; overflow: hidden;
+}
+.audio-progress .bar-fill {
+  position: absolute; left: 0; top: 0; height: 100%; width: 0;
+  background: linear-gradient(90deg, #e63946, #ff6b6b);
+  border-radius: 3px; transition: width 0.2s linear;
+}
+.audio-progress .bar-fill.ended { background: #4ade80; }
+.audio-progress .preview-btn {
+  background: transparent; border: 1px solid #3a3a3e; color: #ccc;
+  padding: 3px 10px; border-radius: 12px; cursor: pointer;
+  font-size: 11px; font-family: inherit; transition: all 0.15s;
+}
+.audio-progress .preview-btn:hover { background: #2a2a2e; color: #fff; border-color: #666; }
+.audio-progress .preview-btn.playing { background: #e63946; border-color: #e63946; color: #fff; }
+
 /* ============ v3 新增 ============ */
 /* Cell type toggle */
 .cell-type-toggle {
@@ -547,6 +573,12 @@ html, body {
         <span id="bpmText">♩ = 50 BPM</span>
         <span class="tag" id="modeTag">慢速</span>
       </div>
+      <div class="audio-progress" id="audioProgress" style="display:none;">
+        <span class="time" id="audioCurrent">0:00</span>
+        <div class="bar" id="audioBar"><div class="bar-fill" id="audioBarFill"></div></div>
+        <span class="time" id="audioTotal">0:00</span>
+        <button class="preview-btn" id="previewBtn" title="试听 BGM（不进入挑战模式）">▶ 试听</button>
+      </div>
     </div>
 
     <div class="controls" id="controls"></div>
@@ -689,7 +721,7 @@ const state = {
   intervalId: null, audioCtx: null,
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
   customAudioBuffer: null, customAudioName: "", customAudioElement: null,
-  audioBpm: 120, audioStartTime: 0, audioDuration: 0,
+  audioBpm: 120, audioStartTime: 0, audioDuration: 0, audioLoop: false,
   tempoPercent: 100,
   playMode: "normal", order: [0,1,2,3,4,5,6,7], orderIdx: 0,
   round: 1, totalRounds: 3, beatsPerRound: 16, beatInRound: 0,
@@ -698,7 +730,7 @@ const state = {
   hits: 0, miss: 0,
   tapMode: true, revealMode: false,
   lastCellTappedAt: -1, tapCooldown: 350,
-  startTime: 0, timerId: null,
+  startTime: 0, timerId: null, previewing: false,
 };
 
 const SPEED_MS = { fast: 500, slow: 1200 };
@@ -706,7 +738,7 @@ const SPEED_BPM = { fast: "♩ = 120 BPM", slow: "♩ = 50 BPM" };
 const SPEED_NAME = { fast: "快速", slow: "慢速" };
 const DEFAULTS = {
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
-  audioBpm: 120, tempoPercent: 100,
+  audioBpm: 120, tempoPercent: 100, audioLoop: false,
   playMode: "normal", totalRounds: 3, beatsPerRound: 16,
   speedIncrease: 0, countdownDur: 3,
   tapMode: true, revealMode: false,
@@ -732,6 +764,8 @@ function init() {
   $("bgmBadge").addEventListener("click", toggleBGM);
   $("fullscreenBtn").addEventListener("click", toggleFullscreen);
   $("settingsBtn").addEventListener("click", openSettings);
+  $("previewBtn").addEventListener("click", togglePreview);
+  $("audioBar").addEventListener("click", seekAudio);
   $("settingsClose").addEventListener("click", closeSettings);
   $("settingsDone").addEventListener("click", closeSettings);
   $("settingsReset").addEventListener("click", resetSettings);
@@ -757,6 +791,7 @@ function init() {
   $("roundsCount").addEventListener("change", (e) => { state.totalRounds = Math.max(0, Math.min(20, parseInt(e.target.value) || 0)); saveSettings(); });
   $("speedIncrease").addEventListener("change", (e) => { state.speedIncrease = Math.max(0, Math.min(50, parseInt(e.target.value) || 0)); saveSettings(); });
   $("countdownDur").addEventListener("change", (e) => { state.countdownDur = Math.max(0, Math.min(10, parseInt(e.target.value) || 3)); saveSettings(); });
+  $("audioLoop").addEventListener("change", (e) => { state.audioLoop = e.target.checked; if (state.customAudioElement) state.customAudioElement.loop = state.audioLoop; saveSettings(); });
   $("tempoInput").addEventListener("input", (e) => {
     state.tempoPercent = parseInt(e.target.value);
     $("tempoVal").textContent = state.tempoPercent + "%";
@@ -802,13 +837,14 @@ function loadSettings() {
   $("revealMode").checked = state.revealMode;
   $("tempoInput").value = state.tempoPercent;
   $("tempoVal").textContent = state.tempoPercent + "%";
+  $("audioLoop").checked = state.audioLoop;
   selectPattern(state.bgmPattern, false);
   selectPlayMode(state.playMode, false);
 }
 function saveSettings() {
   const s = {
     bgmEnabled: state.bgmEnabled, bgmVolume: state.bgmVolume, bgmPattern: state.bgmPattern,
-    audioBpm: state.audioBpm, tempoPercent: state.tempoPercent, audioDuration: state.audioDuration,
+    audioBpm: state.audioBpm, tempoPercent: state.tempoPercent, audioDuration: state.audioDuration, audioLoop: state.audioLoop,
     playMode: state.playMode, totalRounds: state.totalRounds, beatsPerRound: state.beatsPerRound,
     speedIncrease: state.speedIncrease, countdownDur: state.countdownDur,
     tapMode: state.tapMode, revealMode: state.revealMode,
@@ -1226,7 +1262,9 @@ async function handleCustomAudio(e) {
   state.customAudioBuffer = null;
   const url = URL.createObjectURL(file);
   const audio = new Audio(url);
-  audio.loop = true; audio.volume = state.bgmVolume; audio.playbackRate = state.tempoPercent / 100;
+  audio.loop = state.audioLoop; audio.volume = state.bgmVolume; audio.playbackRate = state.tempoPercent / 100;
+  audio.addEventListener("timeupdate", updateAudioProgress);
+  audio.addEventListener("ended", onAudioEnded);
   audio.addEventListener("loadedmetadata", () => {
     // 显示音频元信息
     const dur = audio.duration;
@@ -1298,6 +1336,77 @@ function clearCustomAudio() {
   $("customAudioName").textContent = "未上传自定义音频";
   $("customAudioInput").value = "";
   updateBgmBadge();
+}
+
+function formatTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function updateAudioProgress() {
+  if (!state.customAudioElement) return;
+  const a = state.customAudioElement;
+  const cur = a.currentTime || 0;
+  const dur = a.duration || 0;
+  $("audioCurrent").textContent = formatTime(cur);
+  $("audioTotal").textContent = formatTime(dur);
+  const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
+  $("audioBarFill").style.width = pct + "%";
+  $("audioBarFill").classList.toggle("ended", pct >= 99);
+}
+
+function onAudioEnded() {
+  if (state.previewing) {
+    state.previewing = false;
+    updatePreviewBtn();
+    return;
+  }
+  if (state.playing) {
+    showRoundOverlay(true);
+  }
+}
+
+function togglePreview() {
+  if (!state.customAudioElement) {
+    alert("请先在设置里上传 BGM 音频");
+    return;
+  }
+  const a = state.customAudioElement;
+  if (state.previewing) {
+    a.pause();
+    a.currentTime = 0;
+    state.previewing = false;
+  } else {
+    a.currentTime = state.audioStartTime || 0;
+    a.volume = state.bgmVolume;
+    a.playbackRate = state.tempoPercent / 100;
+    a.play().then(() => { state.previewing = true; updatePreviewBtn(); }).catch(() => {});
+    state.previewing = true;
+  }
+  updatePreviewBtn();
+}
+
+function updatePreviewBtn() {
+  const btn = $("previewBtn");
+  if (!btn) return;
+  if (state.previewing) {
+    btn.textContent = "■ 停止";
+    btn.classList.add("playing");
+  } else {
+    btn.textContent = "▶ 试听";
+    btn.classList.remove("playing");
+  }
+}
+
+function seekAudio(e) {
+  if (!state.customAudioElement) return;
+  const bar = e.currentTarget;
+  const rect = bar.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  state.customAudioElement.currentTime = pct * (state.customAudioElement.duration || 0);
+  updateAudioProgress();
 }
 
 // ============ Settings modal ============
@@ -1398,6 +1507,12 @@ init();
 </script>
 </body>
 </html>
+
+
+
+
+
+
 
 
 
