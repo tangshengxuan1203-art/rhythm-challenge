@@ -972,8 +972,6 @@ function renderControls() {
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
     if (shareBtn1) shareBtn1.onclick = openShare;
-    const fbEn = controls.querySelector("[data-action=fill-en]"); if (fbEn) fbEn.onclick = () => quickFill("en");
-    const fbZh = controls.querySelector("[data-action=fill-zh]"); if (fbZh) fbZh.onclick = () => quickFill("zh");
   } else {
     controls.innerHTML = `
       <div class="speed-toggle">
@@ -998,6 +996,8 @@ function renderControls() {
     controls.querySelector("[data-action=goto-edit]").onclick = () => switchMode("edit");
     const shareBtn2 = controls.querySelector("[data-action=share]");
     if (shareBtn2) shareBtn2.onclick = openShare;
+    const fbEn2 = controls.querySelector("[data-action=fill-en]"); if (fbEn2) fbEn2.onclick = () => quickFill("en");
+    const fbZh2 = controls.querySelector("[data-action=fill-zh]"); if (fbZh2) fbZh2.onclick = () => quickFill("zh");
   }
 }
 
@@ -1509,6 +1509,8 @@ init();
 </script>
 </body>
 </html>
+
+
 
 
 
