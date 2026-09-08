@@ -376,6 +376,7 @@ html, body {
 }
 .crop-box img { max-width: 320px; max-height: 320px; border-radius: 8px; }
 .crop-box .crop-actions { display: flex; gap: 8px; justify-content: center; }
+@keyframes hintBlink { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 /* Modal */
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.7);
@@ -521,7 +522,15 @@ html, body {
       <button class="tab" data-mode="play">🎬 开始挑战</button>
     </div>
 
-    <div class="stage" id="stage">
+    
+      <div class="batch-nav" id="batchNav" style="display:none;">
+        <button class="batch-btn" id="batchPrev">◀ 上一批</button>
+        <div class="batch-info">
+          <div id="batchNavInfo">第 1 / 1 批</div>
+          <div class="batch-count" id="batchAllCount">0 个词</div>
+        </div>
+        <button class="batch-btn" id="batchNext">下一批 ▶</button>
+      </div><div class="stage" id="stage">
       <div class="bgm-badge muted" id="bgmBadge" title="点击切换 BGM">
         <span class="eq"><span></span><span></span><span></span><span></span></span>
         <span class="label" id="bgmLabel">BGM 静音</span>
@@ -710,7 +719,7 @@ html, body {
 
 <script>
 const state = {
-  mode: "edit", words: Array(8).fill(""), cellType: Array(8).fill("text"),
+  mode: "edit", words: Array(8).fill(""), cellType: Array(8).fill("text"), allWords: [], batchIdx: 0, totalBatches: 0,
   activeIndex: -1, playing: false, speed: "slow",
   intervalId: null, audioCtx: null,
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
@@ -736,7 +745,7 @@ const DEFAULTS = {
   playMode: "normal", totalRounds: 3, beatsPerRound: 16,
   speedIncrease: 0, countdownDur: 3,
   tapMode: true, revealMode: false,
-  cellType: Array(8).fill("text"),
+  cellType: Array(8).fill("text"), allWords: [], batchIdx: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -818,13 +827,19 @@ function init() {
 
   document.addEventListener("keydown", handleKey);
   applyUrlParams();
+  updateBatchNav();
 }
 
 function loadWords() {
   const saved = localStorage.getItem("rhythm_words_v3");
-  if (saved) { try { const p = JSON.parse(saved); if (Array.isArray(p) && p.length === 8) state.words = p; } catch(e){} }
+  if (!saved) return;
+  try {
+    const p = JSON.parse(saved);
+    if (Array.isArray(p) && p.length === 8) { state.words = p; }
+    else if (p && Array.isArray(p.words)) { state.words = p.words; state.allWords = p.allWords || []; state.batchIdx = p.batchIdx || 0; state.totalBatches = Math.ceil(state.allWords.length / 8); }
+  } catch(e){}
 }
-function saveWords() { localStorage.setItem("rhythm_words_v3", JSON.stringify(state.words)); }
+function saveWords() { const data = { words: state.words, cellType: state.cellType, allWords: state.allWords, batchIdx: state.batchIdx }; localStorage.setItem("rhythm_words_v3", JSON.stringify(data)); }
 function loadSettings() {
   const saved = localStorage.getItem("rhythm_settings_v3");
   if (!saved) return;
@@ -924,16 +939,19 @@ function triggerImageUpload(idx) {
   input.type = "file"; input.accept = "image/*";
   input.onchange = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("图片太大（>5MB），请用更小的图"); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target.result;
-      // For small images, store full dataURL; for large, downscale
       downscaleImage(dataUrl, 400, (scaled) => {
-        state.words[idx] = scaled;
-        state.cellType[idx] = "image";
-        saveWords(); saveSettings(); renderGrid();
+        try {
+          state.words[idx] = scaled;
+          state.cellType[idx] = "image";
+          saveWords(); saveSettings(); renderGrid();
+        } catch (e) { alert("图片保存失败：localStorage 容量不够。请清除浏览器数据。"); }
       });
     };
+    reader.onerror = () => alert("图片读取失败");
     reader.readAsDataURL(file);
   };
   input.click();
@@ -949,7 +967,9 @@ function downscaleImage(dataUrl, maxSize, cb) {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img, 0, 0, w, h);
     cb(canvas.toDataURL("image/jpeg", 0.85));
+    } catch (e) { console.error("downscale fail", e); cb(dataUrl); }
   };
+  img.onerror = () => { alert("图片解码失败，请尝试其他图片"); };
   img.src = dataUrl;
 }
 
@@ -971,6 +991,7 @@ function renderControls() {
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
     if (shareBtn1) shareBtn1.onclick = openShare;
+    updateBatchNav();
   } else {
     controls.innerHTML = `
       <div class="speed-toggle">
@@ -1184,6 +1205,14 @@ function updateBgmBadge() {
   const playing = state.playing && state.bgmEnabled;
   $("bgmBadge").classList.toggle("muted", !playing);
   $("bgmLabel").textContent = playing ? (state.customAudioElement ? "BGM 自定义" : "BGM Wordonbeat") : "BGM 静音";
+  const bgmHint = $("bgmHint");
+  if (bgmHint) {
+    if (state.customAudioElement || !state.bgmEnabled || !playing) {
+      bgmHint.classList.remove("show");
+    } else {
+      bgmHint.classList.add("show");
+    }
+  }
 }
 function ensureAudioCtx() {
   if (state.audioCtx) { if (state.audioCtx.state === "suspended") state.audioCtx.resume(); return; }
@@ -1316,21 +1345,23 @@ function updateBulkPreview() {
 function confirmBulkImport() {
   const list = parseBulkText($("bulkImportTextarea").value);
   if (list.length === 0) { alert("请输入至少一个单词"); return; }
-  while (list.length < 8) list.push("");
-  state.words = list.slice(0, 8);
   if (bulkType === "mix") {
-    state.cellType = state.words.map(w => {
+    const ct = list.map(w => {
       if (!w) return "text";
       if (/^https?:\/\//.test(w) || /^data:/.test(w)) return "image";
       if (/^[\p{Emoji}]/u.test(w)) return "emoji";
       return "text";
     });
+    while (ct.length < 8) ct.push("text");
+    state.cellType = ct.slice(0, 8);
   } else {
-    state.cellType = state.cellType.map(() => bulkType);
+    state.cellType = Array(list.length).fill(bulkType).concat(Array(Math.max(0, 8 - list.length)).fill("text"));
   }
-  saveWords(); saveSettings();
+  setAllWords(list);
+  saveSettings();
   renderGrid();
   closeBulkImport();
+  updateBatchNav();
 }
 async function pickDesktopAudio() {
   // 现代浏览器（Chrome/Edge 86+）：用 File System Access API 自动定位桌面
@@ -1548,10 +1579,50 @@ function quickFill(type) {
 }
 function clearAll() { state.words = Array(8).fill(""); renderGrid(); saveWords(); }
 
+function setAllWords(list) {
+  state.allWords = list.filter(Boolean);
+  state.totalBatches = Math.ceil(state.allWords.length / 8) || 0;
+  state.batchIdx = 0;
+  loadCurrentBatch();
+  saveWords();
+}
+function loadCurrentBatch() {
+  const start = state.batchIdx * 8;
+  const batch = state.allWords.slice(start, start + 8);
+  while (batch.length < 8) batch.push("" + "");
+  state.words = batch;
+}
+function nextBatch() {
+  if (state.batchIdx < state.totalBatches - 1) { state.batchIdx++; loadCurrentBatch(); renderGrid(); updateBatchNav(); }
+}
+function prevBatch() {
+  if (state.batchIdx > 0) { state.batchIdx--; loadCurrentBatch(); renderGrid(); updateBatchNav(); }
+function updateBatchNav() {
+  const nav = $("batchNav"); if (!nav) return;
+  if (state.totalBatches > 1) {
+    nav.style.display = "flex";
+    const info = $("batchNavInfo"); if (info) info.textContent = "第 " + (state.batchIdx + 1) + " / " + state.totalBatches + " 批";
+    const cnt = $("batchAllCount"); if (cnt) cnt.textContent = state.allWords.length + " 个词";
+    const prev = $("batchPrev"); if (prev) prev.disabled = state.batchIdx === 0;
+    const next = $("batchNext"); if (next) next.disabled = state.batchIdx >= state.totalBatches - 1;
+  } else {
+    nav.style.display = "none";
+  }
+}
+
 init();
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 
 
