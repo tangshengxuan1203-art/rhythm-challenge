@@ -657,6 +657,11 @@ html, body {
           <button class="btn btn-primary" id="pickDesktopAudio" style="padding: 8px 14px; font-size: 12px;" title="通过 File System Access API 打开，定位到桌面">📀 桌面 Wordonbeat</button>
           <button class="btn btn-ghost" id="clearCustomAudio" style="padding: 8px 14px; font-size: 12px;">移除</button>
         </div>
+        <div class="field-row" style="margin-top: 12px;">
+          <span style="color: #aaa; font-size: 13px; flex: 1;">前奏结束 / 首词出现（秒）</span>
+          <input type="number" min="0" max="90" step="0.5" value="10" class="input" style="width: 80px;" id="audioIntroSeconds">
+        </div>
+        <p style="margin: 7px 0 0; color: #777; font-size: 11px; line-height: 1.5;">开始后先完整播放这段前奏；到设定秒数，才在音乐的第一个节拍亮出第一个单词。若歌曲版本不同，可在试听时微调此值。</p>
       </div>
 
       <div class="field">
@@ -746,7 +751,7 @@ const state = {
   intervalId: null, audioCtx: null,
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
   customAudioBuffer: null, customAudioName: "", customAudioElement: null,
-  audioBpm: 120, audioStartTime: 0, audioDuration: 0, audioLoop: false,
+  audioBpm: 120, audioStartTime: 0, audioDuration: 0, audioLoop: false, audioIntroSeconds: 10,
   tempoPercent: 100,
   playMode: "normal", order: [0,1,2,3,4,5,6,7], orderIdx: 0,
   round: 1, totalRounds: 3, beatsPerRound: 16, beatInRound: 0,
@@ -756,14 +761,16 @@ const state = {
   tapMode: true, revealMode: false,
   lastCellTappedAt: -1, tapCooldown: 350,
   startTime: 0, timerId: null, previewing: false, audioPrimed: false, audioError: false,
+  audioSyncFrame: null, audioBeatNumber: -1, introActive: false,
 };
 
 const SPEED_MS = { fast: 500, slow: 1200 };
-const SPEED_BPM = { fast: "♩ = 120 BPM", slow: "♩ = 50 BPM" };
+const SPEED_BPM = { fast: "♩ = 120 BPM", slow: "♩ = 60 BPM" };
 const SPEED_NAME = { fast: "快速", slow: "慢速" };
+const SPEED_RATE = { fast: 1, slow: 0.5 };
 const DEFAULTS = {
   bgmEnabled: true, bgmVolume: 0.5, bgmPattern: "basic",
-  audioBpm: 120, tempoPercent: 100, audioLoop: false,
+  audioBpm: 120, tempoPercent: 100, audioLoop: false, audioIntroSeconds: 10,
   playMode: "normal", totalRounds: 3, beatsPerRound: 16,
   speedIncrease: 0, countdownDur: 3,
   tapMode: true, revealMode: false,
@@ -829,10 +836,15 @@ function init() {
   $("speedIncrease").addEventListener("change", (e) => { state.speedIncrease = Math.max(0, Math.min(50, parseInt(e.target.value) || 0)); saveSettings(); });
   $("countdownDur").addEventListener("change", (e) => { state.countdownDur = Math.max(0, Math.min(10, parseInt(e.target.value) || 3)); saveSettings(); });
   const al = $("audioLoop"); if (al) al.addEventListener("change", (e) => { state.audioLoop = e.target.checked; if (state.customAudioElement) state.customAudioElement.loop = state.audioLoop; saveSettings(); });
+  const ais = $("audioIntroSeconds"); if (ais) ais.addEventListener("change", (e) => {
+    state.audioIntroSeconds = Math.max(0, Math.min(90, Number(e.target.value) || 0));
+    e.target.value = state.audioIntroSeconds;
+    saveSettings();
+  });
   $("tempoInput").addEventListener("input", (e) => {
     state.tempoPercent = parseInt(e.target.value);
     const tv = $("tempoVal"); if (tv) tv.textContent = state.tempoPercent + "%";
-    if (state.customAudioElement) state.customAudioElement.playbackRate = state.tempoPercent / 100;
+    if (state.customAudioElement) setAudioRate(state.customAudioElement);
     saveSettings();
   });
   $("shareClose").onclick = closeShare;
@@ -884,13 +896,14 @@ function loadSettings() {
   const ti = $("tempoInput"); if (ti) ti.value = state.tempoPercent;
   const tv = $("tempoVal"); if (tv) tv.textContent = state.tempoPercent + "%";
   const al2 = $("audioLoop"); if (al2) al2.checked = state.audioLoop;
+  const ais = $("audioIntroSeconds"); if (ais) ais.value = state.audioIntroSeconds;
   selectPattern(state.bgmPattern, false);
   selectPlayMode(state.playMode, false);
 }
 function saveSettings() {
   const s = {
     bgmEnabled: state.bgmEnabled, bgmVolume: state.bgmVolume, bgmPattern: state.bgmPattern,
-    audioBpm: state.audioBpm, tempoPercent: state.tempoPercent, audioDuration: state.audioDuration, audioLoop: state.audioLoop,
+    audioBpm: state.audioBpm, tempoPercent: state.tempoPercent, audioDuration: state.audioDuration, audioLoop: state.audioLoop, audioIntroSeconds: state.audioIntroSeconds,
     playMode: state.playMode, totalRounds: state.totalRounds, beatsPerRound: state.beatsPerRound,
     speedIncrease: state.speedIncrease, countdownDur: state.countdownDur,
     tapMode: state.tapMode, revealMode: state.revealMode,
@@ -1042,7 +1055,8 @@ function renderControls() {
         if (state.speed === btn.dataset.speed) return;
         state.speed = btn.dataset.speed;
         renderControls();
-        if (state.playing) { stopInterval(); startInterval(); }
+        if (state.customAudioElement) setAudioRate(state.customAudioElement);
+        if (state.playing && !state.customAudioElement) { stopInterval(); startInterval(); }
       };
     });
     controls.querySelector("[data-action=toggle]").onclick = togglePlay;
@@ -1121,26 +1135,27 @@ function togglePlay() { state.playing ? stopPlay() : startPlay(); }
 
 function startPlay(nextRound = false) {
   if (!nextRound) { state.round = 1; state.beatInRound = 0; resetScore(); }
-  // 倒计时
+  // 有真实 BGM 时，由音频时间轴控制；前奏期间不亮单词。
+  if (state.bgmEnabled && state.customAudioElement) {
+    actuallyStartPlay();
+    return;
+  }
   if (state.countdownDur > 0) {
-    primeBgmForCountdown();
     state.countdown = state.countdownDur;
     showCountdown(() => actuallyStartPlay());
-  } else {
-    actuallyStartPlay();
-  }
+  } else actuallyStartPlay();
 }
 
 function actuallyStartPlay() {
   state.playing = true; appEl.classList.add("playing");
   state.startTime = Date.now(); startTimer();
-  if (state.activeIndex < 0) { state.orderIdx = 0; setActive(0); }
-  if (state.customAudioElement && state.audioPrimed) {
-    state.customAudioElement.currentTime = state.audioStartTime || 0;
-    state.customAudioElement.muted = false;
-    state.customAudioElement.volume = state.bgmVolume;
+  if (state.bgmEnabled && state.customAudioElement) {
+    startAudioTimeline();
+  } else {
+    if (state.activeIndex < 0) { state.orderIdx = 0; setActive(0); }
+    startInterval(); ensureBgm();
   }
-  startInterval(); ensureBgm(); renderControls();
+  renderControls();
 }
 
 function showCountdown(cb) {
@@ -1166,7 +1181,7 @@ function showCountdown(cb) {
 
 function stopPlay() {
   state.playing = false; appEl.classList.remove("playing");
-  stopInterval(); stopTimer(); stopBgm(); renderControls();
+  stopInterval(); stopAudioTimeline(); stopTimer(); stopBgm(); renderControls();
 }
 
 function resetPlay() {
@@ -1178,6 +1193,73 @@ function resetPlay() {
 
 function startInterval() { if (state.intervalId) clearInterval(state.intervalId); state.intervalId = setInterval(next, SPEED_MS[state.speed]); }
 function stopInterval() { if (state.intervalId) { clearInterval(state.intervalId); state.intervalId = null; } }
+
+function setAudioRate(audio) {
+  audio.playbackRate = SPEED_RATE[state.speed] * (state.tempoPercent / 100);
+}
+
+function clearActiveCell() {
+  state.activeIndex = -1;
+  state.orderIdx = 0;
+  document.querySelectorAll(".cell").forEach(c => c.classList.remove("active"));
+  clearBeatDots();
+  renderGrid();
+  updateProgress();
+}
+
+function startAudioTimeline() {
+  const audio = state.customAudioElement;
+  stopAudioTimeline();
+  state.audioBeatNumber = -1;
+  state.introActive = true;
+  clearActiveCell();
+  audio.currentTime = state.audioStartTime || 0;
+  audio.muted = false;
+  audio.volume = state.bgmVolume;
+  setAudioRate(audio);
+  audio.play().then(() => {
+    updateBgmBadge();
+    syncAudioTimeline();
+  }).catch(() => {
+    state.audioError = true;
+    stopPlay();
+    alert("浏览器未能播放 BGM。请点击“设置”重新选择音频后再开始。");
+  });
+}
+
+function syncAudioTimeline() {
+  if (!state.playing || !state.customAudioElement || state.customAudioElement.paused) return;
+  const audio = state.customAudioElement;
+  const intro = Number(state.audioIntroSeconds) || 0;
+  const elapsed = audio.currentTime - (state.audioStartTime || 0);
+  if (elapsed < intro) {
+    state.introActive = true;
+    roundLabel.textContent = `前奏播放中 · ${Math.max(0, intro - elapsed).toFixed(1)} 秒后开始报词`;
+    progressEl.textContent = "准备中";
+  } else {
+    state.introActive = false;
+    const beat = Math.floor((elapsed - intro) / (60 / state.audioBpm));
+    if (beat !== state.audioBeatNumber) {
+      const previousBeat = state.audioBeatNumber;
+      state.audioBeatNumber = beat;
+      if (beat > 0 && beat % 8 === 0 && previousBeat >= 0 && state.totalBatches > 1) {
+        syncCurrentBatch();
+        state.batchIdx = (state.batchIdx + 1) % state.totalBatches;
+        loadCurrentBatch(); saveWords(); renderGrid(); updateBatchNav();
+      }
+      state.orderIdx = beat % 8;
+      setActive(state.orderIdx);
+    }
+  }
+  state.audioSyncFrame = requestAnimationFrame(syncAudioTimeline);
+}
+
+function stopAudioTimeline() {
+  if (state.audioSyncFrame) cancelAnimationFrame(state.audioSyncFrame);
+  state.audioSyncFrame = null;
+  state.audioBeatNumber = -1;
+  state.introActive = false;
+}
 
 function resetScore() { state.hits = 0; state.miss = 0; updateScore(); }
 function updateScore() {
@@ -1256,6 +1338,7 @@ function ensureBgm() {
   if (!state.bgmEnabled) { updateBgmBadge(); return; }
   if (state.customAudioElement) {
     state.customAudioElement.volume = state.bgmVolume;
+    setAudioRate(state.customAudioElement);
     if (state.customAudioElement.paused) {
       state.customAudioElement.play().catch(() => { state.audioError = true; updateBgmBadge(); });
     }
@@ -1366,7 +1449,7 @@ function bindAudio(audio, label, sizeLabel = "") {
   state.audioPrimed = false;
   audio.loop = state.audioLoop;
   audio.volume = state.bgmVolume;
-  audio.playbackRate = state.tempoPercent / 100;
+  setAudioRate(audio);
   audio.addEventListener("timeupdate", updateAudioProgress);
   audio.addEventListener("ended", onAudioEnded);
   audio.addEventListener("loadedmetadata", () => {
@@ -1547,7 +1630,7 @@ function togglePreview() {
   } else {
     a.currentTime = state.audioStartTime || 0;
     a.volume = state.bgmVolume;
-    a.playbackRate = state.tempoPercent / 100;
+    setAudioRate(a);
     a.play().then(() => { state.previewing = true; updatePreviewBtn(); }).catch(() => {});
     state.previewing = true;
   }
