@@ -246,6 +246,7 @@ html, body {
   background: #1c1c1f; border: 1px solid #2a2a2e; border-radius: 18px;
   padding: 6px 14px; font-size: 12px;
   font-family: 'SF Mono', 'Consolas', monospace;
+  grid-column: 1 / -1;
 }
 .audio-progress .time { color: #aaa; min-width: 36px; text-align: center; }
 .audio-progress .bar {
@@ -1011,6 +1012,7 @@ function renderControls() {
 
 <button class="btn btn-primary" data-action="fill-yilin7a-u1">📖 译林 7A U1</button>
       <button class="btn btn-ghost" data-action="clear">🗑️ 清空</button>
+      <button class="btn btn-ghost" data-action="preview">🔊 试听 BGM</button>
       <button class="btn btn-secondary" data-action="goto-play">▶ 进入挑战</button>
       <button class="btn btn-ghost" data-action="share">🔗 分享</button>
     `;
@@ -1019,6 +1021,7 @@ function renderControls() {
     const bi = controls.querySelector("[data-action=bulk-import]");
     if (bi) bi.onclick = openBulkImport;
     controls.querySelector("[data-action=clear]").onclick = clearAll;
+    controls.querySelector("[data-action=preview]").onclick = togglePreview;
     controls.querySelector("[data-action=goto-play]").onclick = () => switchMode("play");
     const shareBtn1 = controls.querySelector("[data-action=share]");
     if (shareBtn1) shareBtn1.onclick = openShare;
@@ -1067,6 +1070,7 @@ function switchMode(mode) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
   if (mode === "edit") { beatBar.style.display = "none"; infoRow.style.display = "none"; editHint.style.display = "block"; appEl.classList.remove("playing"); }
   else { beatBar.style.display = ""; infoRow.style.display = ""; editHint.style.display = "none"; updateBpm(); }
+  updateAudioControls();
   renderGrid(); renderControls(); updateProgress(); clearBeatDots(); resetScore();
 }
 
@@ -1271,6 +1275,7 @@ function updateBgmBadge() {
   const audible = state.playing && audio && !audio.paused && !audio.muted;
   $("bgmBadge").classList.toggle("muted", !enabled || !audible);
   if (!enabled) $("bgmLabel").textContent = "BGM 已静音";
+  else if (state.bgmVolume <= 0.01) $("bgmLabel").textContent = "BGM 音量为 0";
   else if (state.audioError) $("bgmLabel").textContent = "BGM 加载失败";
   else if (audible) $("bgmLabel").textContent = "BGM 播放中";
   else if (audio) $("bgmLabel").textContent = "BGM 已就绪";
@@ -1379,7 +1384,13 @@ function bindAudio(audio, label, sizeLabel = "") {
     }
   });
   state.customAudioElement = audio;
+  updateAudioControls();
   updateBgmBadge();
+}
+
+function updateAudioControls() {
+  const progress = $("audioProgress");
+  if (progress) progress.style.display = state.mode === "play" && state.customAudioElement ? "flex" : "none";
 }
 
 function loadBundledAudio() {
