@@ -12,7 +12,7 @@ html, body {
   color: #f5f5f7; min-height: 100vh; overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
 }
-.app { max-width: 980px; margin: 0 auto; padding: 20px 16px 64px; min-height: 100vh; display: flex; flex-direction: column; }
+.app { width: min(100%, 1680px); max-width: none; margin: 0 auto; padding: clamp(16px, 2vw, 32px) clamp(16px, 3vw, 56px) 28px; min-height: 100vh; display: flex; flex-direction: column; }
 .header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 4px 0 16px; gap: 12px;
@@ -40,6 +40,23 @@ html, body {
   display: flex; gap: 6px; background: #1c1c1f;
   padding: 4px; border-radius: 26px; margin-bottom: 16px; border: 1px solid #2a2a2e;
 }
+.batch-nav {
+  width: fit-content; max-width: 100%; margin: -4px auto 14px;
+  display: flex; align-items: stretch; gap: 8px; color: #f5f5f7;
+}
+.batch-btn {
+  appearance: none; border: 1px solid #3a3a3e; border-radius: 12px;
+  padding: 10px 16px; background: #1c1c1f; color: #f5f5f7;
+  font: 600 13px/1 inherit; cursor: pointer; transition: 0.15s ease;
+}
+.batch-btn:hover:not(:disabled) { background: #2a2a2e; border-color: #707077; }
+.batch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.batch-info {
+  min-width: 100px; padding: 7px 14px; text-align: center;
+  border: 1px solid #3a3a3e; border-radius: 12px; background: #141417;
+  font-size: 13px; font-weight: 700; line-height: 1.15;
+}
+.batch-count { margin-top: 3px; color: #a7a7ad; font-size: 11px; font-weight: 500; }
 .tab {
   flex: 1; padding: 11px 16px; border: none; background: transparent;
   color: #888; border-radius: 22px; cursor: pointer;
@@ -52,9 +69,9 @@ html, body {
     radial-gradient(ellipse at 25% 25%, rgba(255,255,255,0.55) 0%, transparent 45%),
     radial-gradient(ellipse at 75% 75%, rgba(0,0,0,0.06) 0%, transparent 45%),
     radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.25) 0%, transparent 65%);
-  border-radius: 18px; padding: 56px 28px 36px;
+  border-radius: 22px; padding: 76px clamp(20px, 2.6vw, 52px) clamp(28px, 4vh, 52px);
   box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 0 60px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
-  overflow: hidden; min-height: 480px;
+  overflow: hidden; min-height: clamp(520px, 72vh, 900px); display: flex; flex-direction: column;
 }
 .stage::before {
   content: ""; position: absolute; inset: 0;
@@ -117,9 +134,9 @@ html, body {
   color: rgba(0,0,0,0.04); font-size: 64px; font-weight: 900;
   pointer-events: none; user-select: none; letter-spacing: -3px; white-space: nowrap; z-index: 1;
 }
-.grid { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; z-index: 2; }
+.grid { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: clamp(12px, 1.4vw, 24px); z-index: 2; flex: 1; min-height: 0; }
 .cell {
-  aspect-ratio: 1.05 / 1; background: #fff5d6;
+  min-height: 0; background: #fff5d6;
   background-image: linear-gradient(180deg, #fff8e0 0%, #ffe9b8 100%);
   border: 2px solid #c8b88a; border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
@@ -484,6 +501,10 @@ html, body {
 :fullscreen .stage, :-webkit-full-screen .stage { min-height: 70vh; }
 /* Mobile */
 @media (max-width: 640px) {
+  .app { padding: 14px 16px 24px; }
+  .batch-nav { margin-bottom: 10px; gap: 6px; }
+  .batch-btn { padding: 9px 10px; font-size: 12px; }
+  .batch-info { min-width: 82px; padding: 7px 8px; }
   .grid { gap: 8px; }
   .cell { font-size: 13px; padding: 6px; }
   .progress { font-size: 24px; }
@@ -493,7 +514,7 @@ html, body {
   .watermark { font-size: 36px; }
   .controls { gap: 6px; }
   .btn { padding: 10px 14px; font-size: 12px; }
-  .stage { padding: 48px 14px 28px; min-height: 380px; }
+  .stage { padding: 58px 14px 24px; min-height: min(68vh, 560px); }
   .header-actions { display: none; }
   .info-row { grid-template-columns: 1fr; gap: 8px; }
   .score-panel { justify-content: space-between; }
@@ -733,7 +754,7 @@ const state = {
   hits: 0, miss: 0,
   tapMode: true, revealMode: false,
   lastCellTappedAt: -1, tapCooldown: 350,
-  startTime: 0, timerId: null, previewing: false,
+  startTime: 0, timerId: null, previewing: false, audioPrimed: false, audioError: false,
 };
 
 const SPEED_MS = { fast: 500, slow: 1200 };
@@ -1098,6 +1119,7 @@ function startPlay(nextRound = false) {
   if (!nextRound) { state.round = 1; state.beatInRound = 0; resetScore(); }
   // 倒计时
   if (state.countdownDur > 0) {
+    primeBgmForCountdown();
     state.countdown = state.countdownDur;
     showCountdown(() => actuallyStartPlay());
   } else {
@@ -1109,13 +1131,18 @@ function actuallyStartPlay() {
   state.playing = true; appEl.classList.add("playing");
   state.startTime = Date.now(); startTimer();
   if (state.activeIndex < 0) { state.orderIdx = 0; setActive(0); }
+  if (state.customAudioElement && state.audioPrimed) {
+    state.customAudioElement.currentTime = state.audioStartTime || 0;
+    state.customAudioElement.muted = false;
+    state.customAudioElement.volume = state.bgmVolume;
+  }
   startInterval(); ensureBgm(); renderControls();
 }
 
 function showCountdown(cb) {
   const el = $("countdown"); const num = $("countdownNum");
   el.classList.add("show"); num.textContent = state.countdown;
-  if (state.customAudioElement) {
+  if (state.customAudioElement && !state.audioPrimed) {
     state.customAudioElement.currentTime = state.audioStartTime || 0;
     state.customAudioElement.playbackRate = state.tempoPercent / 100;
     state.customAudioElement.volume = state.bgmVolume;
@@ -1211,20 +1238,43 @@ function closeRoundOverlay() { $("roundOverlay").classList.remove("show"); updat
 
 
 // ============ BGM / 节拍器 ============
+function primeBgmForCountdown() {
+  const audio = state.customAudioElement;
+  if (!state.bgmEnabled || !audio || state.audioPrimed) return;
+  state.audioError = false;
+  audio.currentTime = state.audioStartTime || 0;
+  audio.muted = true;
+  audio.volume = 0;
+  audio.play().then(() => { state.audioPrimed = true; }).catch(() => { state.audioError = true; updateBgmBadge(); });
+}
+
 function ensureBgm() {
   if (!state.bgmEnabled) { updateBgmBadge(); return; }
   if (state.customAudioElement) {
     state.customAudioElement.volume = state.bgmVolume;
-    if (state.customAudioElement.paused) state.customAudioElement.play().catch(() => {});
+    if (state.customAudioElement.paused) {
+      state.customAudioElement.play().catch(() => { state.audioError = true; updateBgmBadge(); });
+    }
   }
   updateBgmBadge();
 }
-function stopBgm() { if (state.customAudioElement && !state.customAudioElement.paused) state.customAudioElement.pause(); updateBgmBadge(); }
+function stopBgm() {
+  if (state.customAudioElement && !state.customAudioElement.paused) state.customAudioElement.pause();
+  if (state.customAudioElement) state.customAudioElement.muted = false;
+  state.audioPrimed = false;
+  updateBgmBadge();
+}
 function toggleBGM() { state.bgmEnabled = !state.bgmEnabled; saveSettings(); const bge = $("bgmEnabled"); if (bge) bge.checked = state.bgmEnabled; state.bgmEnabled ? ensureBgm() : stopBgm(); }
 function updateBgmBadge() {
-  const playing = state.playing && state.bgmEnabled;
-  $("bgmBadge").classList.toggle("muted", !playing);
-  $("bgmLabel").textContent = playing ? (state.customAudioElement ? "BGM Wordonbeat" : "BGM 节拍器") : "BGM 静音";
+  const enabled = state.bgmEnabled;
+  const audio = state.customAudioElement;
+  const audible = state.playing && audio && !audio.paused && !audio.muted;
+  $("bgmBadge").classList.toggle("muted", !enabled || !audible);
+  if (!enabled) $("bgmLabel").textContent = "BGM 已静音";
+  else if (state.audioError) $("bgmLabel").textContent = "BGM 加载失败";
+  else if (audible) $("bgmLabel").textContent = "BGM 播放中";
+  else if (audio) $("bgmLabel").textContent = "BGM 已就绪";
+  else $("bgmLabel").textContent = "BGM 加载中";
   const bgmHint = $("bgmHint");
   if (bgmHint) {
     if (state.customAudioElement || !state.bgmEnabled || !playing) {
@@ -1307,6 +1357,8 @@ function playSuccess() {
 function bindAudio(audio, label, sizeLabel = "") {
   if (state.customAudioElement) state.customAudioElement.pause();
   state.customAudioName = label;
+  state.audioError = false;
+  state.audioPrimed = false;
   audio.loop = state.audioLoop;
   audio.volume = state.bgmVolume;
   audio.playbackRate = state.tempoPercent / 100;
@@ -1576,21 +1628,25 @@ function handleKey(e) {
 // ============ URL params ============
 function applyUrlParams() {
   const p = new URLSearchParams(location.search);
+  let contentChanged = false;
   if (p.has("words")) {
     const list = p.get("words").split(/[|,]/).map(s => s.trim()).filter(Boolean);
     setAllWords(list); saveWords();
+    contentChanged = true;
   }
   if (p.has("type")) {
     const types = p.get("type").split(/[|,]/).map(s => s.trim());
     while (types.length < 8) types.push("text");
     state.cellType = types.slice(0, 8);
     saveSettings();
+    contentChanged = true;
   }
   if (p.get("speed") === "fast" || p.get("speed") === "slow") state.speed = p.get("speed");
   if (p.has("playmode")) state.playMode = p.get("playmode");
   if (p.has("rounds")) state.totalRounds = parseInt(p.get("rounds"));
   if (p.has("bpm")) state.audioBpm = parseInt(p.get("bpm"));
   if (p.has("tempo")) state.tempoPercent = parseInt(p.get("tempo"));
+  if (contentChanged) { renderGrid(); renderControls(); updateBatchNav(); }
   if (p.get("autoplay") === "1" || p.get("mode") === "play" || p.get("start") === "1") {
     setTimeout(() => { switchMode("play"); if (p.get("start") === "1") startPlay(); }, 50);
   }
